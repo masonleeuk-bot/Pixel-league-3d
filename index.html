@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pixel League 3D</title>
+<title>Pixel League 3D Offline</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r146/three.min.js"></script>
 
 <style>
@@ -61,7 +61,7 @@ body {
   align-items: center;
   gap: 10px;
   z-index: 5;
-  pointer-events: none; /* enable only on child buttons */
+  pointer-events: none;
 }
 
 .control-btn {
@@ -75,7 +75,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  pointer-events: auto; /* so buttons can be tapped */
+  pointer-events: auto;
   touch-action: none;
 }
 
@@ -87,15 +87,21 @@ body {
 <body>
 
 <div id="menu">
-  <h1>Pixel League 3D</h1>
-  <p>Enter cheat code:</p>
+  <h1>Pixel League 3D Offline</h1>
+  <p>Enter cheat code (optional):</p>
   <input id="cheat" placeholder="type here" />
+  <p>Select AI difficulty:</p>
+  <select id="difficulty">
+    <option value="0.004">Easy</option>
+    <option value="0.006" selected>Medium</option>
+    <option value="0.009">Hard</option>
+  </select>
   <button onclick="startGame()">Start</button>
-  <p style="margin-top:20px; font-size:14px;">Desktop: use W/A/S/D to drive, Shift to drift, Space to boost. </p>
+  <p style="margin-top:20px; font-size:14px;">Desktop: use W/A/S/D to drive, Shift to drift, Space to boost.</p>
   <p style="font-size:14px;">On mobile, use the on‑screen arrows.</p>
 </div>
 
-<div id="score">Left: 0 | Right: 0</div>
+<div id="score">AI: 0 | You: 0</div>
 
 <!-- On‑screen controls for touch devices -->
 <div id="controls" style="display:none;">
@@ -108,11 +114,12 @@ body {
 
 <script>
 let scene, camera, renderer;
-let car, ball;
+let car, aiCar, ball;
 let keys = {};
 let cheat = false;
-let scoreLeft = 0;
-let scoreRight = 0;
+let scoreAI = 0;
+let scorePlayer = 0;
+let aiAccel = 0.006; // default medium difficulty
 
 const GRAVITY = 0.01;
 const MAX_SPEED = 0.3;
@@ -148,13 +155,21 @@ function init() {
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
-  // Car
+  // Player car
   const carGeo = new THREE.BoxGeometry(0.8, 0.3, 1);
   const carMat = new THREE.MeshStandardMaterial({ color: 0xff44aa });
   car = new THREE.Mesh(carGeo, carMat);
   car.position.set(0, 0.15, 4);
   car.userData.vel = new THREE.Vector3();
   scene.add(car);
+
+  // AI car
+  const aiGeo = new THREE.BoxGeometry(0.8, 0.3, 1);
+  const aiMat = new THREE.MeshStandardMaterial({ color: 0x44aaff });
+  aiCar = new THREE.Mesh(aiGeo, aiMat);
+  aiCar.position.set(0, 0.15, -4);
+  aiCar.userData.vel = new THREE.Vector3();
+  scene.add(aiCar);
 
   // Ball
   const ballGeo = new THREE.SphereGeometry(0.3, 16, 16);
@@ -166,10 +181,10 @@ function init() {
 
   camera.position.set(0, 4, 8);
 
-  document.addEventListener("keydown", (e) => {
+  document.addEventListener('keydown', (e) => {
     keys[e.code] = true;
   });
-  document.addEventListener("keyup", (e) => {
+  document.addEventListener('keyup', (e) => {
     keys[e.code] = false;
   });
 
@@ -196,14 +211,13 @@ function init() {
         e.preventDefault();
         keys[mapping[id]] = false;
       });
-      // handle mouse for desktop demonstration if needed
-      btn.addEventListener('mousedown', (e) => {
+      btn.addEventListener('mousedown', () => {
         keys[mapping[id]] = true;
       });
-      btn.addEventListener('mouseup', (e) => {
+      btn.addEventListener('mouseup', () => {
         keys[mapping[id]] = false;
       });
-      btn.addEventListener('mouseleave', (e) => {
+      btn.addEventListener('mouseleave', () => {
         keys[mapping[id]] = false;
       });
     });
@@ -214,8 +228,12 @@ function init() {
 
 function startGame() {
   cheat = document.getElementById('cheat').value.toLowerCase() === 'mason';
+  // set AI acceleration from difficulty selection
+  const sel = document.getElementById('difficulty');
+  if (sel) {
+    aiAccel = parseFloat(sel.value);
+  }
   document.getElementById('menu').style.display = 'none';
-  // Show jump button on mobile if cheat
   const jumpBtn = document.getElementById('jump');
   if (cheat && jumpBtn) {
     jumpBtn.style.display = 'block';
@@ -263,44 +281,82 @@ function updateCar() {
   car.position.z = Math.max(-5.5, Math.min(5.5, car.position.z));
 }
 
+function updateAICar() {
+  const vel = aiCar.userData.vel;
+  const toBall = new THREE.Vector3().subVectors(ball.position, aiCar.position);
+  toBall.y = 0;
+  if (toBall.length() > 0.1) {
+    toBall.normalize();
+    vel.addScaledVector(toBall, aiAccel);
+  }
+  // friction
+  vel.x *= 0.98;
+  vel.z *= 0.98;
+  // limit speed
+  const horiz = new THREE.Vector3(vel.x, 0, vel.z);
+  if (horiz.length() > MAX_SPEED * 0.8) {
+    horiz.setLength(MAX_SPEED * 0.8);
+    vel.x = horiz.x;
+    vel.z = horiz.z;
+  }
+  if (vel.x !== 0 || vel.z !== 0) {
+    const angle = Math.atan2(-vel.x, -vel.z);
+    aiCar.rotation.y = angle;
+  }
+  vel.y -= GRAVITY;
+  aiCar.position.add(vel);
+  if (aiCar.position.y < 0.15) {
+    aiCar.position.y = 0.15;
+    vel.y = 0;
+  }
+  aiCar.position.x = Math.max(-9.5, Math.min(9.5, aiCar.position.x));
+  aiCar.position.z = Math.max(-5.5, Math.min(5.5, aiCar.position.z));
+}
+
 function updateBall() {
   const vel = ball.userData.vel;
   vel.multiplyScalar(0.995);
   vel.y -= GRAVITY;
   ball.position.add(vel);
-
   if (ball.position.y < 0.3) {
     ball.position.y = 0.3;
     vel.y *= -0.6;
   }
-
   ball.position.x = Math.max(-9.5, Math.min(9.5, ball.position.x));
   ball.position.z = Math.max(-5.5, Math.min(5.5, ball.position.z));
 }
 
 function checkCollision() {
-  const dist = car.position.distanceTo(ball.position);
+  // Player collision
+  let dist = car.position.distanceTo(ball.position);
   if (dist < 0.9) {
     const dir = new THREE.Vector3().subVectors(ball.position, car.position).normalize();
     ball.userData.vel.addScaledVector(dir, 0.2);
   }
-
+  // AI collision
+  dist = aiCar.position.distanceTo(ball.position);
+  if (dist < 0.9) {
+    const dir2 = new THREE.Vector3().subVectors(ball.position, aiCar.position).normalize();
+    ball.userData.vel.addScaledVector(dir2, 0.2);
+  }
+  // Goals
   if (ball.position.x < -10) {
-    scoreRight++;
+    scorePlayer++;
     reset();
   }
   if (ball.position.x > 10) {
-    scoreLeft++;
+    scoreAI++;
     reset();
   }
-
   document.getElementById('score').innerText =
-    'Left: ' + scoreLeft + ' | Right: ' + scoreRight;
+    'AI: ' + scoreAI + ' | You: ' + scorePlayer;
 }
 
 function reset() {
   car.position.set(0, 0.15, 4);
   car.userData.vel.set(0, 0, 0);
+  aiCar.position.set(0, 0.15, -4);
+  aiCar.userData.vel.set(0, 0, 0);
   ball.position.set(0, 0.3, 0);
   ball.userData.vel.set(0, 0, 0);
 }
@@ -308,6 +364,7 @@ function reset() {
 function animate() {
   requestAnimationFrame(animate);
   updateCar();
+  updateAICar();
   updateBall();
   checkCollision();
   camera.lookAt(car.position);
